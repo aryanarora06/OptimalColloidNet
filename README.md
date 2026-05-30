@@ -34,6 +34,8 @@ Uploaded files land at `/kaggle/input/<dataset-name>/`.
 
 All major libraries are pre-installed on Kaggle (use Requirements.txt).
 
+---
+
 ## Step 4 — Train the Model (run the notebook)
 
 Open `optimalcolloidpython.ipynb` and run all cells. Training will:
