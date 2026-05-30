@@ -1,4 +1,4 @@
-# OptimalColloidNet: Microscopic Particle Detection (Kaggle Edition)
+# OptimalColloidNet: Microscopic Particle Detection
 
 ## Overview
 OptimalColloidNet is a deep learning framework designed to accurately detect and localize colloidal particles in microscopy videos. Utilizing a custom multi-head Convolutional Neural Network (CNN) featuring Attention Gates and ASPP, the model predicts exact sub-pixel particle centers.
