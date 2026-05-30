@@ -202,37 +202,63 @@ def infer_tta(model, img_tensor):
         torch.stack(aug_offsets).mean(0).cpu().float().numpy(),
     )
 
-def detect_centers(hmap, offset_map, mask=None, threshold=0.30, min_dist=8,
-                   mask_threshold=0.40, hmap_smooth_sigma=1.0):
+def detect_centers(hmap, offset_map, mask=None, raw_frame_gray=None,
+                   threshold=0.30, min_dist=8,
+                   mask_threshold=0.40, mask_pool_radius=4,
+                   hmap_smooth_sigma=1.0,
+                   contrast_radius=14, contrast_min_std=0.020):
     """
-    Detect particle centres from the heatmap with three FP-reduction steps:
+    Detect particle centres with layered false-positive suppression.
 
-    1. Gaussian-smooth the heatmap before peak finding — suppresses isolated
-       single-pixel noise spikes that score just above `threshold`.
-    2. Raise `threshold` (default 0.30 vs old 0.15) so weak noise peaks are
-       ignored outright.
-    3. Increase `min_dist` (default 8 vs old 3) so peaks can't be packed
-       tighter than ~8 px at the scaled resolution.
-    4. Mask gate — if the model's segmentation mask is provided, discard any
-       peak whose mask score is below `mask_threshold`.  Real particles produce
-       a strong mask response; noise blobs do not.
+    Filter pipeline (each step runs only if its inputs are available):
+      1. Smooth heatmap  — collapses multi-pixel noise spikes into one peak.
+      2. Threshold + NMS — raise threshold to 0.30, min_dist to 8 px.
+      3. Mask pool gate  — check the MAX mask value in a (mask_pool_radius px)
+                           neighbourhood, not just the single pixel.  Noise
+                           peaks that land near-but-not-on a real blob no
+                           longer slip through.
+      4. Local contrast  — compute the std-dev of the raw (pre-model) frame
+                           in a (contrast_radius px) patch around each peak.
+                           Real phase-contrast particles have a bright halo +
+                           dark ring = high local std.  Flat background noise
+                           does not.  Peaks below contrast_min_std are vetoed.
     """
-    # Step 1: smooth heatmap to kill isolated noise spikes
+    # ── Step 1: smooth heatmap ────────────────────────────────────
     if hmap_smooth_sigma > 0:
         hmap = gaussian_filter(hmap, sigma=hmap_smooth_sigma)
 
+    # ── Step 2: peak finding ──────────────────────────────────────
     raw_peaks = peak_local_max(hmap, min_distance=min_dist,
                                threshold_abs=threshold, exclude_border=False)
     if len(raw_peaks) == 0:
         return np.empty((0, 2), dtype=np.float32)
 
+    H, W = hmap.shape
+
+    # ── Pre-compute dilated mask once (cheap max-pool via cv2) ────
+    dilated_mask = None
+    if mask is not None and mask_pool_radius > 0:
+        ksize = 2 * mask_pool_radius + 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
+        dilated_mask = cv2.dilate(mask.astype(np.float32), kernel)
+
     refined = []
     for pk in raw_peaks:
-        r, c = pk[0], pk[1]
+        r, c = int(pk[0]), int(pk[1])
 
-        # Step 4: mask gate — skip peaks with no mask support
-        if mask is not None:
-            if mask[r, c] < mask_threshold:
+        # ── Step 3: dilated mask gate ─────────────────────────────
+        if dilated_mask is not None:
+            if dilated_mask[r, c] < mask_threshold:
+                continue
+
+        # ── Step 4: local image contrast gate ────────────────────
+        if raw_frame_gray is not None:
+            r0 = max(0, r - contrast_radius)
+            r1 = min(H, r + contrast_radius + 1)
+            c0 = max(0, c - contrast_radius)
+            c1 = min(W, c + contrast_radius + 1)
+            patch = raw_frame_gray[r0:r1, c0:c1]
+            if patch.size > 0 and patch.std() < contrast_min_std:
                 continue
 
         dy, dx = offset_map[:, r, c]
@@ -334,10 +360,11 @@ def process_video(video_path, model_weights_path, output_path):
 
         tensor = torch.from_numpy(padded_img[None, None, ...]).to(device)
 
-        # FIX #1: unpack all three return values
-        # FIX #3: pass mask into detect_centers for false-positive gating
+        # pass mask + raw frame for layered false-positive gating
         hmap, mask, offset = infer_tta(model, tensor)
-        centers            = detect_centers(hmap, offset, mask=mask)
+        raw_unpadded = nn_input_gray[:orig_padded_h, :orig_padded_w]
+        centers = detect_centers(hmap, offset, mask=mask,
+                                 raw_frame_gray=raw_unpadded)
 
         annotated_frame = frame.copy()
         for center in centers:
