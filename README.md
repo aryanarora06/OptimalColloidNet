@@ -32,24 +32,7 @@ Uploaded files land at `/kaggle/input/<dataset-name>/`.
 
 ## Step 3 — Install Dependencies
 
-All major libraries are pre-installed on Kaggle. Add this cell at the top of your notebook to confirm/install any missing ones:
-
-```python
-!pip install -q scikit-image opencv-python-headless
-```
-
-The full dependency list used by both files:
-
-| Library | Notes |
-|---|---|
-| `torch` / `torchvision` | Pre-installed on Kaggle GPU images |
-| `numpy` | Pre-installed |
-| `opencv-python-headless` | Use the headless build on Kaggle |
-| `scipy` | Pre-installed |
-| `scikit-image` | May need install (provides `peak_local_max`) |
-| `matplotlib` | Pre-installed |
-
----
+All major libraries are pre-installed on Kaggle (use Requirements.txt).
 
 ## Step 4 — Train the Model (run the notebook)
 
